@@ -43,7 +43,7 @@ MPU6050 sensor;
 
 
 double aggKp=2.8, aggKi=0.8, aggKd=20;
-double consKp=1, consKi=0, consKd=0;
+double consKp=1, consKi=10, consKd=0;
 double Setpoint = 0;
 double PID_OUT;
 
@@ -82,7 +82,7 @@ void loop() {
   // Leer las aceleraciones y velocidades angulares, se calcula
   // el tiempo actual y la diferencia de tiempo para el calculo del
   // angulo mediante la rotación del giroescopio.
-
+  if(){}
   sensor.getAcceleration(&ax, &ay, &az);
   sensor.getRotation(&gx, &gy, &gz);
 
