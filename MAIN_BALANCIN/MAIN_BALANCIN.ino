@@ -20,7 +20,9 @@
 // se almacenará la información de pwm que irá a cada motor
 //y un factor qeue ayuda a regular los motores.
 
-#define PWM_I 95
+int PWM_I = 110;
+float factor_motorA=0.9;
+float factor_motorB =0.7;
 double PWM_A, PWM_B;
 
 //definición de las variables crudas donde se almacenará la lectua
@@ -30,7 +32,7 @@ int ax, ay, az;
 int gx, gy, gz;
 long tiempo_prev;
 float dt;
-double ang_x;
+double ang_x, ang_x1;
 float ang_x_prev, ang_y_prev;
 MPU6050 sensor;
 
@@ -42,13 +44,12 @@ MPU6050 sensor;
 //y un arreglo conservativo para cuando el error sea mucho más pequeño.
 
 
-double aggKp=2.8, aggKi=0.8, aggKd=20;
-double consKp=1, consKi=10, consKd=0;
-double Setpoint = 0;
+double aggKp=50, aggKi=0.008, aggKd=25;
+double consKp=50, consKi=0.08, consKd=1;
+double Setpoint = 22;
 double PID_OUT;
 
-PID Controlador(&ang_x, &PID_OUT, &Setpoint, aggKp, aggKi, aggKd, DIRECT);
-
+PID Controlador(&ang_x1, &PID_OUT, &Setpoint, aggKp, aggKi, aggKd, DIRECT);
 
 //Se define la función de reset por software:
 void (*resetFunc)(void) = 0;
@@ -66,15 +67,14 @@ void setup() {
   pinMode(inB_1,OUTPUT);
   pinMode(inB_2,OUTPUT);
 
-
-  //Se ajusta el Setpoint a 0, que es el error que queremos
-  //alcanzar
-
-  Setpoint = 0;
-  Controlador.SetSampleTime(50); 
-
-  //se enciendo el PID
+  sensor.setXGyroOffset(220);
+  sensor.setYGyroOffset(76);
+  sensor.setZGyroOffset(-85);
+  sensor.setZAccelOffset(1688);
+  
   Controlador.SetMode(AUTOMATIC);
+  Controlador.SetOutputLimits(0, 255);  
+
 
 }
 
@@ -82,7 +82,12 @@ void loop() {
   // Leer las aceleraciones y velocidades angulares, se calcula
   // el tiempo actual y la diferencia de tiempo para el calculo del
   // angulo mediante la rotación del giroescopio.
-  if(){}
+
+  digitalWrite(inA_1, HIGH);
+  digitalWrite(inA_2, LOW);
+  digitalWrite(inB_1, HIGH);
+  digitalWrite(inB_2, LOW);
+
   sensor.getAcceleration(&ax, &ay, &az);
   sensor.getRotation(&gx, &gy, &gz);
 
@@ -100,96 +105,92 @@ void loop() {
   ang_x = (0.98*(ang_x_prev+(gx/131)*dt) + 0.02*accel_ang_x);
   ang_x_prev=ang_x;
 
-  ang_x = ang_x+15;
+  ang_x1 = map(ang_x,-16,16,0,40);
+  //ang_x1 = ang_x;
 
   if (isnan(ang_x)) {
       resetFunc();
     }
 
 
-  double ang_x_aux = ang_x;
-  if(ang_x > 0){
-      ang_x *= -1;
-      }
-
   //Si el angulo es menor a un rango establecido por un error, le enviaremos
   // angulo en 0 para que disminuya la salida del pid y calculamos el pid total.
   // mediante la función Compute de la libreria. 
   
-  float angle_error = Setpoint-ang_x_aux;
+ float angle_error = Setpoint-ang_x1;
 
-  if(-5 < angle_error && angle_error < 5){
-      ang_x = 0;
+  if(-6 < angle_error && angle_error < 7){
       //Cambiamos los valores de las constantes pid para realizar un control
       //mas conservativo, o mas suave. 
       Controlador.SetTunings(consKp,consKi,consKd);
-      Controlador.Compute();
-
-      if(PID_OUT > 150){
-        resetFunc();
-      }
 
       }
 
-  //Si no estamos en el rango establecido por -3 y 3 entonces queremos volver a los valores de
+  //Si no estamos en el rango establecido por -10 y 10 entonces queremos volver a los valores de
   // las constantes para un control mas agresivo.
 
   else{
     Controlador.SetTunings(aggKp,aggKi,aggKd);
-    Controlador.Compute();
   }
  
-
+  Controlador.Compute();
   //Mapeamos los valores de pid para obtener el valor para enviarle
   // al motor. De 0 a 250 para el pid y la salida será de 0 a 150
   // debido a que ya tenemos un valor inicial que es de donde sale
   // los motores salen de la inercia.
-  if(PID_OUT < 10){
+  /*if(PID_OUT < 10){
     PID_OUT = 10;
-  }
-  float PID_PWM = map(PID_OUT, 10, 250, 0, 150);
+  }*/
+
+  float PID_PWM = map(PID_OUT, -255, 255, 0, 150);
 
   //Analizamos mediante unos condicionales en que motor se necesita mas potencia. 
   // y los restamos o sumamos al valor donde el motor sale de la inercia. Lo hacemos
   // con la varibale auxiliar debido a que en esta está almacenada la información del
   // angulo. 
 
-  if(ang_x_aux < 0){
-      PWM_A = abs(PWM_I - PID_PWM);
-      PWM_B = (PWM_I + PID_PWM);
-    }
-    else if(ang_x_aux > 0){
-      PWM_A = PWM_I + PID_PWM;
+  if(angle_error < -4){
       PWM_B = abs(PWM_I - PID_PWM);
+      PWM_A = (PWM_I + PID_PWM);
+      factor_motorA = 0.7;
+      factor_motorB = 0.6;
+      
+    }
+    else if(angle_error > 7){
+      PWM_B = PWM_I + PID_PWM;
+      PWM_A = abs(PWM_I - PID_PWM);
+       factor_motorA = 0.7;
+      factor_motorB = 0.6;
+
+    }
+    else if(-4 < angle_error && angle_error < 6){
+      PWM_B = PID_PWM;
+      PWM_A = PID_PWM;
+      factor_motorA = 1.1;
+      factor_motorB = 0.9;
+      
     }
 
-  //finalmente mandamos el valor analogico al puente H.
-
-  analogWrite(enA, PWM_A);
-  analogWrite(enB, PWM_B*0.79);
-
-  digitalWrite(inA_1, HIGH);
-  digitalWrite(inA_2, LOW);
-  digitalWrite(inB_1, HIGH);
-  digitalWrite(inB_2, LOW);
+  analogWrite(enA, PWM_A*factor_motorA);
+  analogWrite(enB, PWM_B*factor_motorB);
 
 
   //Se muestra el angulo en x y los parametros calculados durante una ejecución 
   // del loop
 
   Serial.print("Angulo en X:  ");
-  Serial.print(ang_x);
-  Serial.print("  Angulo en X aux:  ");
-  Serial.print(ang_x_aux);   
+  Serial.print(ang_x1);
+  Serial.print("  error:  ");
+  Serial.print(angle_error);   
   Serial.print("  PID OUTPUT: ");
   Serial.print(PID_OUT);
   Serial.print("  PID PWM: ");
   Serial.print(PID_PWM);
   Serial.print("  PWM_A: ");
-  Serial.print(PWM_A);
+  Serial.print(PWM_A*factor_motorA);
   Serial.print("  PWM_B: ");
-  Serial.println(PWM_B);
+  Serial.println(PWM_B*factor_motorB);
 
-  delay(50);
+
 
 }
